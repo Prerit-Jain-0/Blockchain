@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 
-pragma solidity >=0.7.0 <0.9.0;
+pragma solidity >=0.4.22 <0.8.11;
+
 
 import "./flight.sol";
 import "./ticket.sol";
@@ -9,59 +10,57 @@ import "./ticket.sol";
 contract TicketManager {
 
     address _owner;
+    address _refund_rules = 0x2557F4c8Ba4BE59eDDAbfd26dF4ECd7F2e678f1d;
 
 	// mappings( Flight_ID => Flight_Contract )
 	mapping( bytes32 => Flight ) _flight_list;
-    bytes32[] _id_indices;
-
-	
+    	
     constructor ()  {
        _owner = msg.sender;
+    }
+
+    modifier flight_exists(bytes32 flight_id_){
+        Flight flight = _flight_list[flight_id_];
+
+        require( _is_flight_exist( flight ), "The flight is not available." );    
+        _;
+
     }
 
     /*************************************************************/
     /*                  API's required for Airlines              */
     /*************************************************************/
-    function add_flight( string memory flight_name, uint flight_time, uint8 total_seats, uint price_per_seat ) public returns( bool ) {
-        address payable airline = payable( msg.sender );
-        bytes32 flight_id = __get_flight_id( flight_name, flight_time );
 
-        require( _is_flight_exist( flight_id ) == false, "The flight is already added." ); // The flight can be added only once.
+    // Adding a new flight by airline.
+    function add_flight( bytes32 flight_id_, uint flight_time_, uint8 total_seats_, uint price_per_seat_ ) public returns( bool ) {
+        Flight flight = _flight_list[flight_id_];
 
-        Flight flight = new Flight( airline, flight_name, flight_time, total_seats, price_per_seat );
+        require( _is_flight_exist( flight ) == false, "The flight is already added." ); // The flight can be added only once.
 
-        _flight_list[flight_id] = flight;
-        _id_indices.push( flight_id );
+        flight = new Flight( flight_time_, total_seats_, price_per_seat_,_refund_rules );
+       
+        _flight_list[flight_id_] = flight;
 
         return true;
     }
 
     // Update flight status by airline
-    function update_flight_status( string memory flight_name_, uint flight_time_, uint8 status_, uint delayed_time_, uint now_ ) public returns( bool ) {
-        address airline   = msg.sender;
-        bytes32 flight_id = __get_flight_id( flight_name_, flight_time_ );
+    function update_flight_status( bytes32 flight_id_, uint8 status_, uint delayed_time_, uint now_ ) flight_exists( flight_id_ ) public returns( bool ) {
+        Flight flight = _flight_list[flight_id_];
 
-        require( _is_flight_exist( flight_id ) == true, "The flight is not available." );
-
-        Flight flight = _flight_list[flight_id];
-
-        flight.update_status( airline, status_, delayed_time_, now_ );
-
-        return true;
+        return flight.update_status( status_, delayed_time_, now_ );
     }
 
     // Cancel flight by airline.
-    function cancle_flight( string memory flight_name_, uint flight_time_, uint now_ ) public returns( bool ) {
-        address airline_   = msg.sender;
-        bytes32 flight_id = __get_flight_id( flight_name_, flight_time_ );
+    function cancel_flight( bytes32 flight_id_, uint now_ ) public returns( bool ) {       
+        return update_flight_status( flight_id_, 2, 0, now_);
+    }
 
-        require( _is_flight_exist( flight_id ) == true, "The flight is not available." );
+    //Claim price due from get_contract_owner
+    function claim_ticket_price( bytes32 flight_id_, uint pnr_, uint now_ ) flight_exists( flight_id_ ) public returns ( bool ) {
+        Flight flight = _flight_list[flight_id_];
 
-        Flight flight = _flight_list[flight_id];
-
-        flight.cancle_flight( airline_, now_ );
-
-        return true;        
+        return flight.claim_ticket_price( pnr_, now_ );
     }
 
 
@@ -69,42 +68,27 @@ contract TicketManager {
     /*                  API's required for Customers             */
     /*************************************************************/
 
-    function book_ticket( string memory flight_name, uint flight_time, uint8 requested_seat_count ) public payable returns( uint ) {
-        address payable _customer = payable( msg.sender );
+    function book_ticket( bytes32 flight_id_, uint8 requested_seat_count_ ) flight_exists( flight_id_ ) public payable returns( uint ) {
+        Flight flight = _flight_list[flight_id_];
+        uint pnr = flight.book_seats{ value:msg.value }( requested_seat_count_ );
 
-        bytes32 flight_id = __get_flight_id( flight_name, flight_time );
-        require( _is_flight_exist( flight_id ) == true, "The flight is not available." );
-
-        Flight flight = _flight_list[flight_id];
-
-        return flight.book_seats( _customer, requested_seat_count, msg.value ); // Return PNR number.
+        return pnr; // Return PNR number.
     }
  
-    function cancel_ticket( string memory flight_name, uint flight_time, uint pnr_, uint now_ ) public {
-        address customer = msg.sender;
-        bytes32 flight_id = __get_flight_id( flight_name, flight_time );
-        require( _is_flight_exist( flight_id ) == true, "The flight is not available." );
+    function cancel_ticket( bytes32 flight_id_, uint pnr_, uint now_ ) flight_exists( flight_id_ )  public {        
+        Flight flight = _flight_list[flight_id_];
 
-        Flight flight     = _flight_list[flight_id];
-
-        return flight.cancel_ticket( customer, pnr_, now_ );
+        return flight.cancel_ticket( pnr_, now_ );
     }
 
-    function claim_refund( string memory flight_name, uint flight_time, uint pnr_, uint now_ ) public {
-        address customer = msg.sender;
-        bytes32 flight_id = __get_flight_id( flight_name, flight_time );
-        require( _is_flight_exist( flight_id ) == true, "The flight is not available." );
+    function claim_refund( bytes32 flight_id_, uint pnr_, uint now_ ) flight_exists( flight_id_ )  public {
+        Flight flight = _flight_list[flight_id_];
 
-        Flight flight     = _flight_list[flight_id];
-
-        return flight.claim_refund( customer, pnr_, now_ );
+        return flight.claim_refund(  pnr_, now_ );
     }
 
-    function get_ticket( string memory flight_name, uint flight_time, uint pnr_ ) public view returns( Ticket.TicketData memory ) {
-        bytes32 flight_id = __get_flight_id( flight_name, flight_time );
-        require( _is_flight_exist( flight_id ) == true, "The flight is not available." );
-
-        Flight flight     = _flight_list[flight_id];
+    function get_ticket( bytes32 flight_id_, uint pnr_ ) flight_exists( flight_id_ ) public view returns( uint, uint8, uint, uint ) {
+        Flight flight = _flight_list[flight_id_];
 
         return flight.get_customer_ticket( pnr_ );
     }
@@ -114,15 +98,9 @@ contract TicketManager {
     /*      Private methods required for the public API's        */
     /*************************************************************/
 
-    function __get_flight_id( string memory flight_name, uint flight_time ) private pure returns( bytes32 ) {
-        return sha256( abi.encodePacked( flight_name, flight_time ) );
-    }
-
-
-    function _is_flight_exist( bytes32 flight_id ) private view returns( bool ) {
-        Flight flight = _flight_list[flight_id];
-
-        bytes32 data = bytes32( abi.encodePacked( flight) );
+    function _is_flight_exist( Flight flight_ ) private pure returns( bool ) {
+        
+        bytes32 data = bytes32( abi.encodePacked( flight_ ) );
         bytes32 NULL = bytes32( uint(0) );
 
         return data != NULL;
@@ -141,12 +119,9 @@ contract TicketManager {
     function get_balance() public view returns (uint) {
         return address(this).balance;
     }
- 
-    function get_flight_details( string memory flight_name, uint flight_time ) public view returns( Flight.FlightData memory ){
-        bytes32 flight_id = __get_flight_id( flight_name, flight_time );
-        Flight flight     = _flight_list[flight_id];
-
-        return flight.get_flight_data();
-    }
     */
+    function update_refund_rules( address _refund_rules_address ) public {
+        _refund_rules = _refund_rules_address;
+    }
+    
 }

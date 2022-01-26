@@ -1,0 +1,188 @@
+Use Cases:
+==========
+
+----------------------------------------------------------------
+1.	Adding flights by airlines.
+----------------------------------------------------------------
+
+=> 	Add a new flight by Airline1 account: 
+	
+	add_flight( 
+				flight_id_ = 0x78afef6b05f41bc1bb14ccee8b253c737ccf4e9d76f33a1c56ca332a1bd550ed, 
+				flight_time_ = 100000,
+				total_seats_ = 100,
+				price_per_seats_ = 3000000000000000000
+			)
+			
+	Desired Output: returns true on success.
+	
+	
+=> 	Add another flight by Airline2 account:
+
+	add_flight( 
+				flight_id_ = 0xa1b43a4de9b0fb055bfbe5f6c6d8861703281ac65b5ce024a67ce5d851fcb4be, 
+				flight_time_ = 100000,
+				total_seats_ = 100,
+				price_per_seats_ = 3000000000000000000
+			)
+			
+	Desired Output: returns true on success.
+	
+
+----------------------------------------------------------------
+2.	Booking tickets by customers.
+----------------------------------------------------------------
+	
+=> Book a ticket with 2 seats by a customer account in Airline1's flight:
+
+	book_ticket(
+				flight_id_ = 0x78afef6b05f41bc1bb14ccee8b253c737ccf4e9d76f33a1c56ca332a1bd550ed,
+				requested_seat_count_ = 2
+			)
+			
+	Desired Output: returns PNR number on success. Ticket price should deduct from customer account.
+	
+			
+=> Book a ticket with 4 seats by a customer account in Airline2's flight:
+
+	book_ticket(
+				flight_id_ = 0xa1b43a4de9b0fb055bfbe5f6c6d8861703281ac65b5ce024a67ce5d851fcb4be,
+				requested_seat_count_ = 4
+			)
+	
+	Desired Output: returns PNR number on success. Ticket price should deduct from customer account.
+	
+
+=> Book a ticket with 3 seats by a customer account in Airline1's flight:
+
+	book_ticket(
+				flight_id_ = 0x78afef6b05f41bc1bb14ccee8b253c737ccf4e9d76f33a1c56ca332a1bd550ed,
+				requested_seat_count_ = 3
+			)
+	
+	Desired Output: returns PNR number on success. Ticket price should deduct from customer account.
+	
+	
+=> Book a ticket with 5 seats by a customer account in Airline2's flight:
+
+	book_ticket(
+				flight_id_ = 0xa1b43a4de9b0fb055bfbe5f6c6d8861703281ac65b5ce024a67ce5d851fcb4be,
+				requested_seat_count_ = 5
+			)
+	
+	Desired Output: returns PNR number on success. Ticket price should deduct from customer account.
+	
+
+----------------------------------------------------------------
+3.	Cancel tickets by customers.
+----------------------------------------------------------------
+
+=> 	Cancel ticket by customer before 24 hours of the flight start time, when the ticket is in BOOKED state. In any other state of ticket, this call revert an error message.
+
+	cancel_ticket(
+					flight_id_=0x78afef6b05f41bc1bb14ccee8b253c737ccf4e9d76f33a1c56ca332a1bd550ed,
+					pnr_=1,
+					now_=13500
+				)
+	
+	Desired Output: Customer account should reflect 40% penalty amount.
+	
+	
+=>	Cancel ticket by customer between 24 hours to 2 hours before the flight start time, when the ticket is in BOOKED state. In any other state of ticket, this call revert an error message.
+
+	cancel_ticket(
+					flight_id_=0xa1b43a4de9b0fb055bfbe5f6c6d8861703281ac65b5ce024a67ce5d851fcb4be,
+					pnr_=2,
+					now_=90000
+				)
+	
+	Desired Output: Customer account should reflect 60% penalty amount.
+	
+
+=>	Cancel ticket by customer after "2 hours before the flight start time", when the ticket is in BOOKED state. In any other state of ticket, this call revert an error message.
+
+	cancel_ticket(
+					flight_id_=0x78afef6b05f41bc1bb14ccee8b253c737ccf4e9d76f33a1c56ca332a1bd550ed,
+					pnr_=2,
+					now_=95000
+				)
+	
+	Desired Output: Customer get 100% penalty and no amount reflects back to customer account.
+	
+
+	
+----------------------------------------------------------------
+4.	Update Cancel status of flight by airline.
+----------------------------------------------------------------
+
+An airline account can update it’s flight status to CANCELLED using below API.
+The airline can update the status only within 24 hours of the flight start time.
+
+
+	cancel_flight(
+					flight_id_=0xa1b43a4de9b0fb055bfbe5f6c6d8861703281ac65b5ce024a67ce5d851fcb4be,
+					now_=110000
+				)
+
+	Desired Output: The flight status is set to CANCELLED.
+	
+	
+----------------------------------------------------------------
+5.	Update ON-TIME status of flight by airline.
+----------------------------------------------------------------
+An airline account can update it’s flight status to ON-TIME using below API.
+The airline can update the status only within 24 hours of the flight start time.
+
+	update_flight_status( 
+							flight_id_ = 0x78afef6b05f41bc1bb14ccee8b253c737ccf4e9d76f33a1c56ca332a1bd550ed, 
+							status_ = 0, 
+							delayed_time_ = 0, 
+							now_ = 11000
+					)
+	
+	Desired Output: The flight status is set to ON-TIME.
+
+
+----------------------------------------------------------------
+6.	Update DELAYED status of flight by airline.
+----------------------------------------------------------------
+An airline account can update it’s flight status to DELAYED using below API.
+The airline can update the status only within 24 hours of the flight start time.
+
+	update_flight_status( 
+							flight_id_ = 0x78afef6b05f41bc1bb14ccee8b253c737ccf4e9d76f33a1c56ca332a1bd550ed, 
+							status_ = 1, 
+							delayed_time_ = 103600, 
+							now_ = 11000
+					)
+	
+	Desired Output: The flight status is set to DELAYED.
+	
+	
+----------------------------------------------------------------
+5.	Claimed refund by customer.
+----------------------------------------------------------------	
+A customer account can claim refund for his ticket using below API.
+The claim for refunds can be made only after 24 hours of flight departure time.
+
+	claim_refund( 
+					flight_id_ = 0x78afef6b05f41bc1bb14ccee8b253c737ccf4e9d76f33a1c56ca332a1bd550ed, 
+					pnr_ = 1, 
+					now_ = 200000
+				)
+
+	Desired Output: Customer account should be reflected with a refund amount calculated as per the rules defined in refund_rules.sol contract.
+	
+	
+----------------------------------------------------------------
+6.	Claimed ticket prices by airline.
+----------------------------------------------------------------
+An airline account can claim ticket price for booked tickets using below API.
+The claim for tickets by airline can be made only after 24 hours of flight departure time.
+
+	claim_ticket_price( 
+					flight_id_ = 0x78afef6b05f41bc1bb14ccee8b253c737ccf4e9d76f33a1c56ca332a1bd550ed, 
+					pnr_ = 1, 
+					now_ = 200000
+				)
+

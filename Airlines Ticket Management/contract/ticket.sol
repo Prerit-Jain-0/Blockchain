@@ -1,16 +1,21 @@
 // SPDX-License-Identifier: UNLICENSED
 
-pragma solidity >=0.7.0 <0.9.0;
+pragma solidity >=0.4.22 <0.8.11;
+
 
 contract Ticket {
+    address private _airline;
+    address private _customer;
+    address private _owner_contract;
 
-    address payable public _airline;
-    address payable public _customer;
-
-    enum TicketStatus { BOOKED, SETTLED }
+    enum TicketStatus { 
+                        BOOKED, 
+                        CLAIMED_BY_CUSTOMER, 
+                        CLAIMED_BY_AIRLINE, 
+                        SETTLED
+                    }
 
     struct TicketData {
-        string  flight_name;
         uint    flight_time;
         uint8   booked_seats;
         uint    total_price;
@@ -18,22 +23,15 @@ contract Ticket {
 	}
 
     TicketStatus _status;
-    TicketData   _ticket_data;
-
-    modifier instate( TicketStatus expected_status ) {
-          
-        require( _status == expected_status, "The ticket is not in expected state for this action." );
-        _;
-    }
-                   
-    constructor( address payable airline_, address payable customer_, string memory flight_name_, uint flight_time_, uint8 seat_count_, uint total_seat_, uint pnr_ ) payable {
-
+    TicketData  public  _ticket_data;
+                  
+    constructor( address airline_, uint flight_time_, uint8 seat_count_, uint total_seat_, uint pnr_ ) payable {
         _airline  = airline_;
-        _customer = customer_;
+        _customer = tx.origin;
+        _owner_contract = msg.sender;
         _status   = TicketStatus.BOOKED;
 
         _ticket_data  = TicketData({
-                                flight_name:  flight_name_,
                                 flight_time:  flight_time_,
                                 booked_seats: seat_count_,
                                 total_price:  total_seat_,
@@ -41,59 +39,122 @@ contract Ticket {
                             });
     }
 
-    function cancel_by_customer( address customer_, uint8 penalty_percentage_ ) instate( TicketStatus.BOOKED ) public {
-        require( _customer == customer_, "Only ticket owner account can cancel the ticket." );
-        
-        _refund_payment( penalty_percentage_ );
-       _status = TicketStatus.SETTLED;        
+
+    /*************************************************************/
+    /*                  Modifier methods                         */
+    /*************************************************************/
+
+    modifier _is_authorized_call() {
+        require( msg.sender == _owner_contract, "Possible hack - called by unowned contract" );
+        _;
     }
 
-    function cancel_by_airline( address airline_ ) instate( TicketStatus.BOOKED ) public {
-        require( _airline == airline_, "Only airline account can cancel the ticket." );
-
-        _refund_payment( 0 ); // penalty is 0% when cancelled by airline.
-       _status = TicketStatus.SETTLED;        
+    modifier _is_customer_call() {
+        require( tx.origin == _customer, "Ticket can be changed only by ticket customer" );
+        _;
+    }
+   
+    modifier _can_claim_funds() {
+        require( _status != TicketStatus.SETTLED, "Ticket is already settled" );
+        _;
     }
 
-    function claimed_by_customer( address customer_, uint8 refund_percentage_ ) instate( TicketStatus.BOOKED ) public {
-        require( _customer == customer_, "Only ticket owner account can claim the refund." );
 
-        uint8 penalty_percentage_ = 100 - refund_percentage_;
+    /*************************************************************/
+    /*                  Public API's required for Airline        */
+    /*************************************************************/
+	
+    function claimed_by_airline( uint8 refund_percentage_ ) _is_authorized_call _can_claim_funds public payable returns( bool ) {
+        require( _status != TicketStatus.CLAIMED_BY_AIRLINE,"Airline has already claimed their funds" );
 
-        _refund_payment( penalty_percentage_ );
-       _status = TicketStatus.SETTLED;        
+        uint total_value = address(this).balance;
+        uint airline_part;
+        TicketStatus new_status ;
+
+        if( _status != TicketStatus.CLAIMED_BY_CUSTOMER ) {
+            uint customer_part = _calculate_customer_claim( refund_percentage_ );
+            airline_part = total_value - customer_part;
+            new_status = TicketStatus.CLAIMED_BY_AIRLINE;
+        }else{
+            airline_part = total_value;
+            new_status = TicketStatus.SETTLED;
+        }
+
+        _payment_to_airline( airline_part );
+        _status = new_status;
+
+        return true;
     }
 
-    function _refund_payment( uint8 penalty_percentage_ ) private {
+
+    /*************************************************************/
+    /*                  Public API's required for Customers      */
+    /*************************************************************/
+
+    function cancel_by_customer( uint8 penalty_percentage_ ) _is_authorized_call _is_customer_call public {
+        require( _status == TicketStatus.BOOKED, "The ticket can only be cancelled if it's in BOOKED state." );
+
         uint airline_part  = ( address(this).balance * penalty_percentage_ ) / 100;
         uint customer_part = address(this).balance - airline_part;
-        
-        _customer.transfer( customer_part );
-        _airline.transfer( airline_part );
+
+        _payment_to_customer( customer_part );
+        _status = TicketStatus.CLAIMED_BY_CUSTOMER;     
     }
 
-    function claimed_by_airline( address airline_ ) instate( TicketStatus.BOOKED ) public payable {
-        // After 24 hours of departure time, if the ticket is still with BOOKED status, then 
-        // the contact amount can be claimed by the airline.
-        require( _airline == airline_, "Only airline account can claim the ticket amount." );
-        
-        uint now_ = block.timestamp; // Current timestamp
-        require( (now_ - _ticket_data.flight_time) > (24*60*60), "The airline can claim only after 24 hours of departure time." ) ;
+    function claimed_by_customer( uint8 refund_percentage_ ) _is_authorized_call _is_customer_call _can_claim_funds public returns( bool ){
+        require( _status != TicketStatus.CLAIMED_BY_CUSTOMER,"Customer has already claimed their funds" );
 
-        _airline.transfer( address(this).balance );
-        _status = TicketStatus.SETTLED;
+        uint total_value = address(this).balance;
+        uint customer_part;
+        TicketStatus new_status ;
+
+        if( _status != TicketStatus.CLAIMED_BY_AIRLINE ) {
+            customer_part = _calculate_customer_claim( refund_percentage_ );            
+            new_status = TicketStatus.CLAIMED_BY_CUSTOMER;
+        } else {
+            customer_part = total_value;
+            new_status = TicketStatus.SETTLED;
+        }
+
+        _payment_to_customer( customer_part );
+        _status = new_status;
+
+        return true;        
     }
 
-    function get_ticket_data() public view returns( TicketData memory ) {
-        return _ticket_data;
+
+    /*************************************************************/
+    /*      Private methods required for the public API's        */
+    /*************************************************************/
+
+    function _payment_to_customer( uint amount_ ) private {
+        payable(_customer).transfer( amount_ );
     }
 
-    function get_ticket_owner_address() public view returns( address ) {
+    function _payment_to_airline( uint amount_ ) private {
+        payable(_airline).transfer( amount_ );
+    }
+
+    function _calculate_customer_claim( uint8 refund_perc_ ) public view returns( uint ){
+        uint customer_part = ( address(this).balance * refund_perc_ ) / 100;
+        return customer_part;
+    }
+
+    
+    /*************************************************************/
+    /*               Common public APIs                          */
+    /*************************************************************/
+    function  get_booked_seats() public view returns ( uint8 ) {
+       return _ticket_data.booked_seats;
+    }
+    
+    /*
+    function get_ticket_owner() public view returns( address ) {
         return _customer;
     }
 
     function get_balance() public view returns (uint) {
         return address(this).balance;
     }
-
+    */
 }
